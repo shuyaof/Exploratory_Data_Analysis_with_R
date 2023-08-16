@@ -1,0 +1,363 @@
+---
+title: "95-868 M23 Project"
+subtitle: "Due, Saturday, August 5, 2023 11:59 pm ET"
+author:
+- Vera (Shuyao) Fan
+- shuyaof
+format:
+  html:
+    self-contained: true
+    toc: true
+    toc-location: left
+params:
+  show_code: false
+---
+
+```{r setup, include=FALSE}
+
+###########################
+# STYLE EDITS: IGNORE THIS
+###########################
+
+# normally you'll want to include this with the libraries at the beginning of your document
+knitr::opts_chunk$set(message = FALSE, # markdown won't knit messages
+                      warning = FALSE, # markdown won't knit warnings
+                      echo = TRUE)     # code will be included
+
+```
+
+```{r}
+# Import packages
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(ggrepel)
+library(dplyr)
+```
+
+```{r,echo=params$show_code}
+# Read the data sets
+park_visits <- read_csv("national_parks.csv")
+state_pop <- read_csv("state_pop.csv")
+gas_price <- read_csv("gas_price.csv")
+```
+
+# Problem 1
+
+Which regions have seen the largest *percent* increase in visitors (at national parks *only*) from 1985 to 2015?
+
+Show this as a horizontal bar chart with the percent change on the x-axis and region on the y-axis. Ensure the bars are properly ordered. Show the regions with their full names instead of abbreviations (hint: Wikipedia will helpfully provide these, consider `case_when`) and include the total number of national parks in each region in parentheses as part of the axis labels. Regions with a positive percent change should have a different color from regions with a negative percent change.
+
+```{r,echo=params$show_code}
+# Change region name to the full name
+park_visits_full <- park_visits |> 
+  mutate(region_full_names = case_when(
+  region == "AK" ~ "Alaska",
+  region == "IM" ~ "Intermountain",
+  region == "MW" ~ "Midwest",
+  region == "NC" ~ "National Capital",
+  region == "NE" ~ "Northeast",
+  region == "PW" ~ "Pacific West",
+  region == "SE" ~ "Southeast",
+  TRUE ~ as.character(region))) |> # In case the abbreviation is not matched, keep the original abbreviation as the full name
+  filter(region_full_names!='NT') # filter out the region abbreviation 'NT'
+
+park_visits_full$year <- as.numeric(park_visits_full$year)
+park_visits_full
+```
+
+```{r,echo=params$show_code}
+park_visits_compare <-  park_visits_full |> 
+  filter(year %in% c(1985,2015),unit_type=='National Park') |> 
+  select(region,region_full_names,year,visitors) |> 
+  group_by(region, region_full_names,year) |> 
+  summarise(visitors=sum(visitors))
+park_visits_compare
+```
+
+```{r,echo=params$show_code}
+#change column names as they can't be numbers
+df_wide <- park_visits_compare |> 
+  pivot_wider(names_from = year, values_from = visitors)
+df_wide <- df_wide |> 
+  rename(visitors_1985 = `1985`,
+         visitors_2015 = `2015`)
+#Calculate the percent changes from 1985 to 2015
+park_visits_percent_change <- df_wide|> 
+ mutate(percent_change = (visitors_2015 - visitors_1985) / visitors_1985)
+park_visits_percent_change
+```
+
+
+```{r,echo=params$show_code}
+# Calculate the total number of unique parks by region
+num_parks <- park_visits_full |> 
+  filter(unit_type=='National Park', year<=2015&year>=1985) |>
+  group_by(region) |> 
+  summarize(distinct_parks = n_distinct(unit_name))
+num_parks
+park_visits_final <- left_join(park_visits_percent_change, num_parks, by = "region")
+park_visits_final
+```
+
+
+```{r, echo=params$show_code}
+# draw the bar plot
+ggplot(park_visits_final, aes(x = percent_change, y = reorder(region_full_names, percent_change))) +
+  geom_bar(aes(fill = factor(sign(percent_change))), stat = "identity") +
+  scale_fill_manual(values = c("yellow2", "darkorchid4"), guide = FALSE) +  # Set colors for negative and positive values
+  labs(title = "National parks in the Alaska & Intermountain regions\nsaw the largest increase in visitors from 1985 to 2015",
+       x = "Percent Change in Visitors Since 1985",y="") +
+  scale_y_discrete(labels = function(x) paste(x, "\n(", park_visits_final$distinct_parks[match(x, park_visits_final$region_full_names)], " parks)", sep = "")) +
+  scale_x_continuous(labels = percent_format(scale = 100)) +
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        plot.title = element_text(hjust = 0),
+        panel.grid.major.x = element_line(color = 'darkgrey',size=0.3),
+        panel.background = element_blank(),
+        panel.border= element_rect(color='black',fill=NA),
+        axis.ticks = element_blank())
+```
+
+Explanation:
+
+During the period between 1985 and 2015, the Alaska and Intermountain regions emerged as the standout stars, experiencing a remarkable surge in visitor percentage. Despite having only half the number of parks as the Intermountain region, Alaska's allure proved irresistible to travelers. In contrast, the Midwest, Pacific, and Southeast regions received relatively modest increases in visitors, each falling short of a 60% rise over the same 30-year span. However, not all regions were fortunate enough to witness a positive trend. Both the National Capital and Northeast regions faced a decline in the number of visitors. It's plausible that the limited number of parks in these areas contributed to their relative unpopularity.
+
+# Problem 2
+
+Which type of entity is most frequented?
+
+The National Park Service supports many different park types: national parks, national monuments, etc. Determine the four most common types of park (called `unit_type` in the data set) by counting the number of distinct occurrences in the data set. Create a faceted line graph (`facet_wrap`) for these four park types, with time from 1985 to 2015 on the x-axis and visitors per 100 people in the US for each year on the y-axis. Make sure that the faceted plots are ordered by the highest value in 2015. (Hint: you can do this by manually setting the levels of the `unit_type` variable using `factor` as part of your data manipulation steps.) Change the style of the facet labels/headers in some way.
+
+```{r, echo=params$show_code}
+# Get the most common unit type of parks in the data set
+common_parks <- park_visits_full |> 
+  group_by(unit_type) |> 
+  summarize(n = n_distinct(unit_name)) |> 
+  arrange(desc(n))
+common_parks_4 <- head(common_parks,4)
+common_parks_4
+# Calculate the population by year in the US
+pop_year <- state_pop |> 
+  filter(year>=1985&year<=2015) |> 
+  group_by(year) |> 
+  summarize(population=sum(pop))
+pop_year
+# Calculate total visitors in the common_4
+common_visitors <- park_visits_full |> 
+  filter(year>=1985&year<=2015, unit_type %in% common_parks_4$unit_type ) |>
+  group_by(unit_type,year) |> 
+  summarize(visitors=sum(visitors))
+common_visitors
+```
+
+```{r, echo=params$show_code}
+#join two dataframe
+merged_df <- inner_join(common_visitors, pop_year, by = "year")
+visitor_per_100 <- merged_df |> 
+  mutate(percentage=visitors/population*100)
+visitor_per_100
+```
+
+```{r, echo=params$show_code}
+# get the order of places in 2015
+visitor_order_2015 <-  common_visitors |>
+  filter(year==2015) |> 
+  arrange(desc(visitors))
+visitor_order_2015
+```
+
+```{r, echo=params$show_code}
+#create the line graph
+ggplot(visitor_per_100, aes(x = year, y = percentage, group = unit_type)) +
+  geom_line(color = "black", size = 0.7) +
+  facet_wrap(~factor(unit_type, levels=visitor_order_2015$unit_type),ncol=2)+
+  scale_x_continuous(breaks = seq(1985, 2015, 5), labels = seq(1985, 2015, 5)) +
+  labs(title = "National parks remain the most frequently-visited\nentity supported by NPS",
+       x = "",
+       y = "Visitors per 100 People") +
+  theme(strip.text = element_text(color = "white"),
+        strip.background = element_rect(fill = "darkgreen", color="black"),
+        legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = 'darkgrey',size=0.3),
+        panel.background = element_blank(),
+        panel.border= element_rect(color='black',fill=NA),
+        axis.ticks = element_blank())
+```
+
+Explanation:
+
+Over the 30-year span, National Parks have consistently remained the most beloved type of visited entities, attracting over 20 visitors per 100 people. Meanwhile, National Historic Sites have been less popular, with less than 5 visitors per 100 people. National Historical Parks and National Monuments have shared a similar level of popularity, experiencing a stable number of visitors over time. However, there has been a noticeable decline in the number of visitors to both National Parks and National Monuments a little before the year 2000.
+
+# Problem 3
+
+How do gas prices affect total visitors?
+
+Create a scatter plot showing the gas price against visits per 100 people in the US, from 1980 onward for national parks only in the Southeast and Pacific-West regions. The y-axis should be gas prices in 2015 dollars and the x-axis should be visitors per 100 people in the US for each year. (Hint: you will have to `left_join` with the `state_pop` data as well as the `gas_price` data.) Add a line of best-fit for each group and instead of using a legend, label a point from each group.
+
+```{r, echo=params$show_code}
+# filter out gas price, park visit and state population to be 1980 and beyond, filer out park visits to be by national park and two regions
+gas_price_beyond_1980 <- gas_price |>
+  filter(year>=1980)
+
+park_visitor_beyond_1980 <- park_visits_full |> 
+  filter(year>=1980, unit_type=='National Park', region %in% c('PW','SE')) |> 
+  select(year, region, visitors) |>  
+  group_by(year, region) |> 
+  summarise(visitors=sum(visitors)) 
+park_visitor_beyond_1980
+
+state_pop_beyond_1980 <- state_pop |>
+  filter(year>=1980) |> 
+  group_by(year) |> 
+  summarise(population=sum(pop))
+state_pop_beyond_1980
+```
+
+```{r, echo=params$show_code}
+# join park visits filtered with state pop filtered beyond 1980, calculate visitors per 100
+merged_df2 <- left_join(park_visitor_beyond_1980,state_pop_beyond_1980, by=c('year'))
+merged_df2 <- merged_df2|>
+  mutate(visitors_per_100=visitors/population*100)
+merged_df2
+# join the result with gas price beyond 1980
+merged_df3 <-  left_join(merged_df2, gas_price_beyond_1980, by='year')
+merged_df3
+```
+
+```{r, echo=params$show_code}
+# create data label for both regions
+label_data <- merged_df3 |> 
+  filter(year==2014)
+label_data
+# Create a custom color palette for regions
+region_colors <- c("SE" = "mediumturquoise", "PW" = "tomato1")
+```
+
+```{r, echo=params$show_code}
+# create scatter plot with ggplot
+ggplot(merged_df3, aes(y = gas_constant, x = visitors_per_100, color = region)) +
+  geom_point() +
+  labs(title = "Visitors to national parks in the Pacific West and \nSoutheast region seem to be negatively affected by gas prices",
+       y = "Gas Price(2015 $/gallon)",
+       x = "Visits Per 100 People in the US") +
+  geom_smooth(aes(group = region, color=region), method = "lm",se = TRUE) +
+  scale_color_manual(values=region_colors) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = 'darkgrey',size=0.3),
+        panel.background = element_blank(),
+        panel.border= element_rect(color='black',fill=NA),
+        axis.ticks = element_blank()) +
+  xlim(4,7) +
+  ylim(1,4) +
+  geom_label_repel(data = label_data, aes(x = visitors_per_100, y = gas_constant, label = c("Pacific West","Southeast")), size = 4)
+  
+```
+
+Explanation: 
+
+Based on the scatter plot, a clear pattern emerges, indicating an inverse relationship between visits to national parks and gas prices in both the Pacific West and Southeast regions. Notably, the ratio between gas price and visits per 100 people appears to align similarly for both regions. Additionally, it's interesting to observe that while the Pacific West region experiences higher gas prices, when number of visits remains comparable to the Southeast region.
+
+# Problem 4
+
+Which national parks have become the most popular?
+
+Create a line graph with one line per park, for national parks only, and time on the x-axis, 1985 to 2015. The value on the y-axis should be visitors per 100 people in the US for each year. (Hint: you will have to `left_join` with the `state_pop` data.) Figure out which two parks are consistently the most visited and highlight those lines. Use some kind of annotation method to label those two lines with the name of the park.
+
+```{r, echo=params$show_code}
+#prep data for the plot
+filtered_park_visit <- park_visits_full |> 
+  filter(year>=1985&year<=2015,unit_type=="National Park") |>
+  group_by(year,unit_name) |> 
+  summarise(visitors=sum(visitors))
+filtered_park_visit
+
+state_pop_filtered <- state_pop |> 
+  filter(year>=1985&year<=2015) |> 
+  group_by(year) |> 
+  summarise(population=sum(pop))
+state_pop_filtered
+
+merged_4 <- left_join(filtered_park_visit, state_pop_filtered, by='year')
+merged_4 <- merged_4 |> 
+  group_by(unit_name, year) |> 
+  summarise(visitors=sum(visitors),population=sum(population)) |> 
+  mutate(visitors_per_100=visitors/population*100) |> 
+  arrange(desc(visitors_per_100))
+merged_4
+```
+
+```{r, echo=params$show_code,fig.width=8,fig.height=5}
+#merge data and create line plot
+merged_4 |> 
+  mutate(top2 = ifelse(unit_name %in%
+              c("Grand Canyon National Park","Great Smoky Mountains National Park"), unit_name, "The rest parks")) |> 
+  mutate(top2 = factor(top2, levels = c("Great Smoky Mountains National Park","Grand Canyon National Park", "The rest parks"))) |> 
+  ggplot(aes(x = year, y = visitors_per_100,group=unit_name, color=top2,
+             size = top2, alpha = top2)) +
+  geom_line() +
+  scale_x_continuous(limits = c(1985, 2015)) +
+  labs(x = "", y = "Visitors per 100 people in US", title = "Great Smoky Mountain National Parks and Grand Canyon National Park\nhave become the most popular from 1985 to 2015") +
+  scale_x_continuous(breaks = seq(1985, 2015, 5), labels = seq(1985, 2015, 5)) +
+  scale_color_manual(values = c("deeppink","orange","darkgrey")) +
+  scale_size_manual(values = c(1.5, 1.5, 0.5)) +
+  scale_alpha_manual(values = c(1, 1, 0.6)) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.grid.major.x=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = 'lightgrey',size=0.3),
+        panel.background = element_blank(),
+        panel.border= element_rect(color='black',fill=NA),
+        axis.ticks = element_blank()) +
+  guides(color = guide_legend(nrow = 3))
+```
+
+Explanation:
+
+The Great Smoky Mountains National Park stands out as a favorite among visitors, attracting over three visitors for every 100 people. Its popularity reached a peak around 1987. Although there has been a slight decline in recent years, it remains a cherished destination for many. Following closely behind is the Grand Canyon National Park, which has more than one visitor per 100 people. This park maintains a steady level of popularity compared to other national parks. Most of the remaining national parks, in contrast, receive less than one visitor per 100 people.
+
+# Problem 5
+
+Which region has the most national parks and national monuments?
+
+Using the data set(s) available, formulate your own question and answer it using any chart type that we've discussed in class. In addition to the summary of your conclusions, discuss why you chose the particular chart type that you did for the question you came up with.
+
+```{r, echo=params$show_code}
+# get a unique count of national parks and monuments in the 7 regions
+national_count <- park_visits_full |>
+  filter(year>=1985&year<=2015,unit_type %in% c("National Park","National Monument")) |> 
+  group_by(region_full_names, unit_type) |> 
+  summarise(count=n_distinct(unit_name))
+national_count
+```
+
+```{r, echo=params$show_code}
+# Create the bar plot
+custom_colors <- c("khaki2","darkseagreen2")
+
+ggplot(national_count, aes(x = reorder(region_full_names, -count), y = count, fill = unit_type)) +
+  geom_col(alpha=0.95) +
+  labs(title = "Intermountain region has the most of National Parks and National\nMonuments from 1985 to 2015",
+       x = "",
+       y = "Number of Parks and Monuments") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = 'lightgrey',size=0.3),
+        panel.background = element_blank(),
+        panel.border= element_rect(color='black',fill=NA),
+        axis.ticks = element_blank()) +
+  scale_fill_manual(values = custom_colors) 
+```
+
+Explanation:
+
+The bar plot displays a unique count of parks and monuments per region from the years 1985 to 2015. The Intermountain region stands out with the highest number of national parks and monuments, offering travelers a diverse array of destinations to explore. Conversely, the National Capital region doesn't have any national monuments and only comprises a limited number of parks. The Pacific West Region and Alaska regions are the second and third regions with the highest number of national parks.
+
+I specifically chose a stacked bar chart, setting it apart from the previous four questions. In order to enhance visual clarity, I focused on just two unit types for comparison. Therefore, the data is presented in a more easily digestible manner.
+
+As a traveler planning to visit national parks and monuments, this chart would undoubtedly lead me to favor the Intermountain region as my destination of choice. Its abundant selection of parks and monuments provides a thrilling range of options to choose from.
